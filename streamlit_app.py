@@ -1,151 +1,74 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Function to load the CSV file
+def load_csv(file):
+    return pd.read_csv(file)
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Function to display the filters and table
+def display_vehicle_selection(data):
+    st.title("Vehicle Selection App")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+    # Display column names for debugging
+    st.write("Column names in the uploaded file:")
+    st.write(data.columns)
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+    # Normalize column names (remove leading/trailing spaces and lower case)
+    data.columns = data.columns.str.strip().str.lower()
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # Expected column names (normalize them for comparison)
+    expected_columns = {
+        'make': 'make of vehicle',
+        'model': 'model of vehicle',
+        'price': 'price'
+    }
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    # Check if 'Make of vehicle' column exists (case-insensitive)
+    if expected_columns['make'] in data.columns:
+        make = st.selectbox("Select Make of Vehicle", data[expected_columns['make']].unique())
+        
+        # Filter the data based on selected make
+        filtered_data_by_make = data[data[expected_columns['make']] == make]
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+        # Check if 'Model of vehicle' column exists
+        if expected_columns['model'] in filtered_data_by_make.columns:
+            model = st.selectbox("Select Model of Vehicle", filtered_data_by_make[expected_columns['model']].unique())
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+            # Further filter the data based on selected model
+            filtered_data_by_model = filtered_data_by_make[filtered_data_by_make[expected_columns['model']] == model]
 
-    return gdp_df
+            # Pricing Filter (if the 'Price' column exists)
+            if expected_columns['price'] in filtered_data_by_model.columns:
+                min_price, max_price = st.slider(
+                    "Select Price Range",
+                    int(filtered_data_by_model[expected_columns['price']].min()),
+                    int(filtered_data_by_model[expected_columns['price']].max()),
+                    (int(filtered_data_by_model[expected_columns['price']].min()), int(filtered_data_by_model[expected_columns['price']].max()))
+                )
+                filtered_data_by_model = filtered_data_by_model[
+                    (filtered_data_by_model[expected_columns['price']] >= min_price) & 
+                    (filtered_data_by_model[expected_columns['price']] <= max_price)
+                ]
 
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
+            # Display filtered table
+            st.subheader("Filtered Results")
+            st.dataframe(filtered_data_by_model)
         else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+            st.error(f"'{expected_columns['model']}' column not found in the uploaded data.")
+    else:
+        st.error(f"'{expected_columns['make']}' column not found in the uploaded data.")
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# Streamlit app code
+st.title("Upload Vehicle Data")
+
+# File upload
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+
+# If a file is uploaded, load and display the data
+if uploaded_file is not None:
+    data = load_csv(uploaded_file)
+    st.subheader("Uploaded Data")
+    st.dataframe(data)
+
+    # Display the vehicle selection filters
+    display_vehicle_selection(data)
